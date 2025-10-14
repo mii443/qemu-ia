@@ -3403,6 +3403,18 @@ int kvm_vcpu_ioctl(CPUState *cpu, unsigned long type, ...)
     ret = ioctl(cpu->kvm_fd, type, arg);
     accel_cpu_ioctl_end(cpu);
     if (ret == -1) {
+        printf("[mIA] failed to ioctl KVM fd %d type %lu: %s\n",
+               cpu->kvm_fd, type, strerror(errno));
+        // print args
+        if (arg) {
+            int i;
+            uint8_t *p = (uint8_t *)arg;
+            printf("  args: ");
+            for (i = 0; i < 64; i++) {
+                printf("%02x ", p[i]);
+            }
+            printf("\n");
+        }
         ret = -errno;
     }
     return ret;

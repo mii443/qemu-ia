@@ -3491,6 +3491,7 @@ static int kvm_put_xcrs(X86CPU *cpu)
     struct kvm_xcrs xcrs = {};
 
     if (!has_xcrs) {
+        printf("[mIA] vCPU does not support XCRs\n");
         return 0;
     }
 
@@ -5299,7 +5300,7 @@ int kvm_arch_put_registers(CPUState *cpu, int level, Error **errp)
     ret = has_sregs2 ? kvm_put_sregs2(x86_cpu) : kvm_put_sregs(x86_cpu);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Failed to set special registers");
-        return ret;
+        // return ret;
     }
 
     if (level >= KVM_PUT_RESET_STATE) {
@@ -5341,8 +5342,9 @@ int kvm_arch_put_registers(CPUState *cpu, int level, Error **errp)
     }
     ret = kvm_put_xcrs(x86_cpu);
     if (ret < 0) {
-        error_setg_errno(errp, -ret, "Failed to set XCRs");
-        return ret;
+        //error_setg_errno(errp, -ret, "Failed to set XCRs");
+        printf("[mIA] Failed to set XCRs: %d\n", ret);
+        //return ret;
     }
     ret = kvm_put_msrs(x86_cpu, level);
     if (ret < 0) {
