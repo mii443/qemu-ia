@@ -1505,7 +1505,14 @@ static int pdptrs_post_load(void *opaque, int version_id)
 {
     X86CPU *cpu = opaque;
     CPUX86State *env = &cpu->env;
-    env->pdptrs_valid = true;
+    if (env->pdptrs[0] == 0 && env->pdptrs[1] == 0 &&
+        env->pdptrs[2] == 0 && env->pdptrs[3] == 0) {
+        env->pdptrs_valid = false;
+        printf("Warning: all pdptrs are zero, disabling pdptrs\n");
+    } else {
+        env->pdptrs_valid = true;
+        printf("Info: pdptrs restored from VM state\n");
+    }
     return 0;
 }
 
