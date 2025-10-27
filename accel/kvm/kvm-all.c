@@ -3403,17 +3403,68 @@ int kvm_vcpu_ioctl(CPUState *cpu, unsigned long type, ...)
     ret = ioctl(cpu->kvm_fd, type, arg);
     accel_cpu_ioctl_end(cpu);
     if (ret == -1) {
-        printf("[mIA] failed to ioctl KVM fd %d type %lu: %s\n",
+        printf("[mIA] failed to ioctl KVM fd %x type %lx: %s\n",
                cpu->kvm_fd, type, strerror(errno));
         // print args
         if (arg) {
             int i;
             uint8_t *p = (uint8_t *)arg;
-            printf("  args: ");
-            for (i = 0; i < 64; i++) {
-                printf("%02x ", p[i]);
+
+            /* Special handling for KVM_SET_SREGS2 */
+            if (type == KVM_SET_SREGS2) {
+                struct kvm_sregs2 *sregs2 = (struct kvm_sregs2 *)arg;
+                printf("  kvm_sregs2 dump:\n");
+                printf("    CS: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->cs.base, sregs2->cs.limit, sregs2->cs.selector,
+                       sregs2->cs.type, sregs2->cs.present, sregs2->cs.dpl, sregs2->cs.db,
+                       sregs2->cs.s, sregs2->cs.l, sregs2->cs.g, sregs2->cs.avl, sregs2->cs.unusable);
+                printf("    DS: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->ds.base, sregs2->ds.limit, sregs2->ds.selector,
+                       sregs2->ds.type, sregs2->ds.present, sregs2->ds.dpl, sregs2->ds.db,
+                       sregs2->ds.s, sregs2->ds.l, sregs2->ds.g, sregs2->ds.avl, sregs2->ds.unusable);
+                printf("    ES: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->es.base, sregs2->es.limit, sregs2->es.selector,
+                       sregs2->es.type, sregs2->es.present, sregs2->es.dpl, sregs2->es.db,
+                       sregs2->es.s, sregs2->es.l, sregs2->es.g, sregs2->es.avl, sregs2->es.unusable);
+                printf("    FS: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->fs.base, sregs2->fs.limit, sregs2->fs.selector,
+                       sregs2->fs.type, sregs2->fs.present, sregs2->fs.dpl, sregs2->fs.db,
+                       sregs2->fs.s, sregs2->fs.l, sregs2->fs.g, sregs2->fs.avl, sregs2->fs.unusable);
+                printf("    GS: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->gs.base, sregs2->gs.limit, sregs2->gs.selector,
+                       sregs2->gs.type, sregs2->gs.present, sregs2->gs.dpl, sregs2->gs.db,
+                       sregs2->gs.s, sregs2->gs.l, sregs2->gs.g, sregs2->gs.avl, sregs2->gs.unusable);
+                printf("    SS: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->ss.base, sregs2->ss.limit, sregs2->ss.selector,
+                       sregs2->ss.type, sregs2->ss.present, sregs2->ss.dpl, sregs2->ss.db,
+                       sregs2->ss.s, sregs2->ss.l, sregs2->ss.g, sregs2->ss.avl, sregs2->ss.unusable);
+                printf("    TR: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->tr.base, sregs2->tr.limit, sregs2->tr.selector,
+                       sregs2->tr.type, sregs2->tr.present, sregs2->tr.dpl, sregs2->tr.db,
+                       sregs2->tr.s, sregs2->tr.l, sregs2->tr.g, sregs2->tr.avl, sregs2->tr.unusable);
+                printf("    LDT: base=%016llx limit=%08x sel=%04x type=%02x p=%d dpl=%d db=%d s=%d l=%d g=%d avl=%d unusable=%d\n",
+                       (unsigned long long)sregs2->ldt.base, sregs2->ldt.limit, sregs2->ldt.selector,
+                       sregs2->ldt.type, sregs2->ldt.present, sregs2->ldt.dpl, sregs2->ldt.db,
+                       sregs2->ldt.s, sregs2->ldt.l, sregs2->ldt.g, sregs2->ldt.avl, sregs2->ldt.unusable);
+                printf("    GDT: base=%016llx limit=%04x\n", (unsigned long long)sregs2->gdt.base, sregs2->gdt.limit);
+                printf("    IDT: base=%016llx limit=%04x\n", (unsigned long long)sregs2->idt.base, sregs2->idt.limit);
+                printf("    CR0=%016llx CR2=%016llx CR3=%016llx CR4=%016llx CR8=%016llx\n",
+                       (unsigned long long)sregs2->cr0, (unsigned long long)sregs2->cr2,
+                       (unsigned long long)sregs2->cr3, (unsigned long long)sregs2->cr4,
+                       (unsigned long long)sregs2->cr8);
+                printf("    EFER=%016llx APIC_BASE=%016llx\n",
+                       (unsigned long long)sregs2->efer, (unsigned long long)sregs2->apic_base);
+                printf("    flags=%016llx\n", (unsigned long long)sregs2->flags);
+                printf("    PDPTRs: %016llx %016llx %016llx %016llx\n",
+                       (unsigned long long)sregs2->pdptrs[0], (unsigned long long)sregs2->pdptrs[1],
+                       (unsigned long long)sregs2->pdptrs[2], (unsigned long long)sregs2->pdptrs[3]);
+            } else {
+                printf("  args: ");
+                for (i = 0; i < 64; i++) {
+                    printf("%02x ", p[i]);
+                }
+                printf("\n");
             }
-            printf("\n");
         }
         ret = -errno;
     }
