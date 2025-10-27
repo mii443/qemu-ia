@@ -3597,10 +3597,26 @@ static int kvm_put_sregs2(X86CPU *cpu)
     sregs.efer = env->efer;
 
     if (env->pdptrs_valid) {
+        bool has_nonzero_pdptr = false;
+
         for (i = 0; i < 4; i++) {
             sregs.pdptrs[i] = env->pdptrs[i];
+            if (env->pdptrs[i] != 0) {
+                has_nonzero_pdptr = true;
+            }
         }
-        sregs.flags |= KVM_SREGS2_FLAGS_PDPTRS_VALID;
+
+        /*
+         * Only set PDPTRS_VALID flag if at least one PDPTR is non-zero.
+         * In long mode with CR4.PCIDE=1, 4-level paging is used and PDPTRs
+         * are not applicable. Setting PDPTRS_VALID with all-zero PDPTRs
+         * can cause validation errors in KVM (especially on AMD hosts).
+         * This situation can occur during cross-vendor migration when the
+         * pdptrs subsection is not transmitted.
+         */
+        if (has_nonzero_pdptr) {
+            sregs.flags |= KVM_SREGS2_FLAGS_PDPTRS_VALID;
+        }
     }
 
     return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_SREGS2, &sregs);
