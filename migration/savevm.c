@@ -2740,7 +2740,9 @@ qemu_loadvm_section_start_full(QEMUFile *f, uint8_t type)
         start_ts = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
     }
 
+    printf("[mIA] vmstate_load start\n");
     ret = vmstate_load(f, se);
+    printf("[mIA] vmstate_load end\n");
     if (ret < 0) {
         error_report("error while loading state for instance 0x%"PRIx32" of"
                      " device '%s'", instance_id, idstr);
@@ -2793,7 +2795,9 @@ qemu_loadvm_section_part_end(QEMUFile *f, uint8_t type)
         start_ts = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
     }
 
+    printf("[mIA] vmstate_load start (part end)\n");
     ret = vmstate_load(f, se);
+    printf("[mIA] vmstate_load end (part end)\n");
     if (ret < 0) {
         error_report("error while loading state section id %d(%s)",
                      section_id, se->idstr);
@@ -3196,7 +3200,13 @@ int qemu_loadvm_state(QEMUFile *f)
         }
     }
 
+    if (migrate_intel_to_amd()) {
+        printf("[mIA] Converting VM state from Intel to AMD...\n");
+    }
+
+    printf("[mIA] cpu_synchronize_all_post_init start\n");
     cpu_synchronize_all_post_init();
+    printf("[mIA] cpu_synchronize_all_post_init end\n");
 
     return ret;
 }

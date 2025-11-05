@@ -360,6 +360,13 @@ bool migrate_zero_copy_send(void)
     return s->capabilities[MIGRATION_CAPABILITY_ZERO_COPY_SEND];
 }
 
+bool migrate_intel_to_amd(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->capabilities[MIGRATION_CAPABILITY_INTEL_TO_AMD];
+}
+
 /* pseudo capabilities */
 
 bool migrate_multifd_flush_after_each_section(void)

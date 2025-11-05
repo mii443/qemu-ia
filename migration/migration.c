@@ -881,7 +881,9 @@ process_incoming_migration_co(void *opaque)
                       MIGRATION_STATUS_ACTIVE);
 
     mis->loadvm_co = qemu_coroutine_self();
+    printf("[mIa] qemu_loadvm_state start\n");
     ret = qemu_loadvm_state(mis->from_src_file);
+    printf("[mIa] qemu_loadvm_state end\n");
     mis->loadvm_co = NULL;
 
     trace_vmstate_downtime_checkpoint("dst-precopy-loadvm-completed");

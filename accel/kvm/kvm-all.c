@@ -2964,7 +2964,9 @@ void kvm_cpu_synchronize_post_reset(CPUState *cpu)
 static void do_kvm_cpu_synchronize_post_init(CPUState *cpu, run_on_cpu_data arg)
 {
     Error *err = NULL;
+    printf("[mIA] kvm_arch_put_registers start\n");
     int ret = kvm_arch_put_registers(cpu, KVM_PUT_FULL_STATE, &err);
+    printf("[mIA] kvm_arch_put_registers end\n");
     if (ret) {
         if (err) {
             error_reportf_err(err, "Putting registers after init: ");
@@ -3458,6 +3460,12 @@ int kvm_vcpu_ioctl(CPUState *cpu, unsigned long type, ...)
                 printf("    PDPTRs: %016llx %016llx %016llx %016llx\n",
                        (unsigned long long)sregs2->pdptrs[0], (unsigned long long)sregs2->pdptrs[1],
                        (unsigned long long)sregs2->pdptrs[2], (unsigned long long)sregs2->pdptrs[3]);
+            } else if (type == KVM_SET_NESTED_STATE) {
+                printf("  kvm_set_nested_state\n");
+                struct kvm_nested_state *ns = (struct kvm_nested_state *)arg;
+                printf("    flags=%04x\n", ns->flags);
+                printf("    format=%04x\n", ns->format);
+                printf("    size=%08x\n", ns->size);
             } else {
                 printf("  args: ");
                 for (i = 0; i < 64; i++) {

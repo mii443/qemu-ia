@@ -3561,6 +3561,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
     sregs.flags = 0;
 
     if ((env->eflags & VM_MASK)) {
+        printf("[mIA] VM_MASK\n");
         set_v8086_seg(&sregs.cs, &env->segs[R_CS]);
         set_v8086_seg(&sregs.ds, &env->segs[R_DS]);
         set_v8086_seg(&sregs.es, &env->segs[R_ES]);
@@ -3568,6 +3569,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
         set_v8086_seg(&sregs.gs, &env->segs[R_GS]);
         set_v8086_seg(&sregs.ss, &env->segs[R_SS]);
     } else {
+        printf("[mIA] !VM_MASK\n");
         set_seg(&sregs.cs, &env->segs[R_CS]);
         set_seg(&sregs.ds, &env->segs[R_DS]);
         set_seg(&sregs.es, &env->segs[R_ES]);
@@ -3589,7 +3591,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
     sregs.cr0 = env->cr[0];
     sregs.cr2 = env->cr[2];
     sregs.cr3 = env->cr[3];
-    sregs.cr4 = env->cr[4];
+    sregs.cr4 = env->cr[4] & !0x2000;
 
     sregs.cr8 = cpu_get_apic_tpr(cpu->apic_state);
     sregs.apic_base = cpu_get_apic_base(cpu->apic_state);
@@ -5242,6 +5244,9 @@ static int kvm_put_nested_state(X86CPU *cpu)
     } else {
         env->nested_state->flags &= ~KVM_STATE_NESTED_GIF_SET;
     }
+
+    // mIA: change nested state format to SVM
+    env->nested_state->format = 1;
 
     assert(env->nested_state->size <= max_nested_state_len);
     return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_NESTED_STATE, env->nested_state);

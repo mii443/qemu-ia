@@ -30,6 +30,7 @@
 #include "system/runstate.h"
 #include "ui/qemu-spice.h"
 #include "system/system.h"
+#include "system/kvm.h"
 #include "options.h"
 #include "migration.h"
 
