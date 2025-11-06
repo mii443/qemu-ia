@@ -3591,7 +3591,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
     sregs.cr0 = env->cr[0];
     sregs.cr2 = env->cr[2];
     sregs.cr3 = env->cr[3];
-    sregs.cr4 = env->cr[4] & !0x2000;
+    sregs.cr4 = env->cr[4];
 
     sregs.cr8 = cpu_get_apic_tpr(cpu->apic_state);
     sregs.apic_base = cpu_get_apic_base(cpu->apic_state);
@@ -5246,7 +5246,8 @@ static int kvm_put_nested_state(X86CPU *cpu)
     }
 
     // mIA: change nested state format to SVM
-    env->nested_state->format = 1;
+/*    if (migrate_intel_to_amd())
+        env->nested_state->format = 1;*/
 
     assert(env->nested_state->size <= max_nested_state_len);
     return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_NESTED_STATE, env->nested_state);

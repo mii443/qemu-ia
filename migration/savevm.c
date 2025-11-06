@@ -26,6 +26,7 @@
  * THE SOFTWARE.
  */
 
+#include "migration/converter.h"
 #include "qemu/osdep.h"
 #include "hw/boards.h"
 #include "net/net.h"
@@ -3202,6 +3203,7 @@ int qemu_loadvm_state(QEMUFile *f)
 
     if (migrate_intel_to_amd()) {
         printf("[mIA] Converting VM state from Intel to AMD...\n");
+        convert_vmstate_intel_to_amd();
     }
 
     printf("[mIA] cpu_synchronize_all_post_init start\n");
