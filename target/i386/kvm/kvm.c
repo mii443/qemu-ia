@@ -5245,10 +5245,6 @@ static int kvm_put_nested_state(X86CPU *cpu)
         env->nested_state->flags &= ~KVM_STATE_NESTED_GIF_SET;
     }
 
-    // mIA: change nested state format to SVM
-/*    if (migrate_intel_to_amd())
-        env->nested_state->format = 1;*/
-
     assert(env->nested_state->size <= max_nested_state_len);
     return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_NESTED_STATE, env->nested_state);
 }

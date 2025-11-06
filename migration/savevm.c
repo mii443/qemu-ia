@@ -3202,7 +3202,6 @@ int qemu_loadvm_state(QEMUFile *f)
     }
 
     if (migrate_intel_to_amd()) {
-        printf("[mIA] Converting VM state from Intel to AMD...\n");
         convert_vmstate_intel_to_amd();
     }
 

@@ -12,18 +12,14 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "converter.h"
-#include <stdio.h>
 
-void convert_vmstate_intel_to_amd(void) {
-    printf("[mIA] Converting VM state from Intel to AMD...\n");
-/*    CPUState *cpu;
-
-    CPU_FOREACH(cpu) {
-        X86CPU *x86_cpu = X86_CPU(cpu);
-         Convert SREGS
-        CPUX86State *env = &x86_cpu->env;
-        env->cr[4] &= ~0x2000;
-//            env->nested_state->format = 1;
-    }*/
+/*
+ * Weak stub for targets that don't implement vendor conversion.
+ * Target-specific implementations (e.g., x86) will override this.
+ */
+void __attribute__((weak)) convert_vmstate_intel_to_amd(void)
+{
+    /* No conversion needed for non-x86 targets */
 }

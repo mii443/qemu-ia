@@ -3,6 +3,7 @@
 #include "exec/cputlb.h"
 #include "hw/isa/isa.h"
 #include "migration/cpu.h"
+#include "migration/converter.h"
 #include "kvm/hyperv.h"
 #include "hw/i386/x86.h"
 #include "kvm/kvm_i386.h"
@@ -1808,3 +1809,17 @@ const VMStateDescription vmstate_x86_cpu = {
         NULL
     }
 };
+
+/* CPU vendor conversion for Intel to AMD migration */
+void convert_vmstate_intel_to_amd(void)
+{
+    printf("[mIA] Converting VM state from Intel to AMD...\n");
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        X86CPU *x86_cpu = X86_CPU(cpu);
+        CPUX86State *env = &x86_cpu->env;
+        env->cr[4] &= ~0x2000;
+        env->nested_state->format = KVM_STATE_NESTED_FORMAT_SVM;
+    }
+}
