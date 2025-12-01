@@ -519,6 +519,8 @@
 #
 # @intel-to-amd: Support migration from Intel to AMD CPUs.
 #
+# @amd-to-intel: Support migration from AMD to Intel CPUs.
+#
 # Features:
 #
 # @unstable: Members @x-colo and @x-ignore-shared are experimental.
@@ -538,7 +540,7 @@
            { 'name': 'x-ignore-shared', 'features': [ 'unstable' ] },
            'validate-uuid', 'background-snapshot',
            'zero-copy-send', 'postcopy-preempt', 'switchover-ack',
-           'dirty-limit', 'mapped-ram', 'intel-to-amd'] }
+           'dirty-limit', 'mapped-ram', 'intel-to-amd', 'amd-to-intel'] }
 
 ##
 # @MigrationCapabilityStatus:
