@@ -3334,6 +3334,11 @@ int kvm_cpu_exec(CPUState *cpu)
             ret = kvm_convert_memory(run->memory_fault.gpa, run->memory_fault.size,
                                      run->memory_fault.flags & KVM_MEMORY_EXIT_FLAG_PRIVATE);
             break;
+        case KVM_EXIT_EXCEPTION:
+            printf("[mIA] KVM_EXIT_EXCEPTION: exception=%u error_code=0x%x\n",
+                   run->ex.exception, run->ex.error_code);
+            ret = kvm_arch_handle_exit(cpu, run);
+            break;
         default:
             ret = kvm_arch_handle_exit(cpu, run);
             break;
