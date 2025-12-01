@@ -16,5 +16,6 @@
 #define QEMU_MIGRATION_CONVERTER_H
 
 void convert_vmstate_intel_to_amd(void);
+void convert_vmstate_amd_to_intel(void);
 
 #endif

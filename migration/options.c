@@ -367,6 +367,13 @@ bool migrate_intel_to_amd(void)
     return s->capabilities[MIGRATION_CAPABILITY_INTEL_TO_AMD];
 }
 
+bool migrate_amd_to_intel(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->capabilities[MIGRATION_CAPABILITY_AMD_TO_INTEL];
+}
+
 /* pseudo capabilities */
 
 bool migrate_multifd_flush_after_each_section(void)

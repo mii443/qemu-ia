@@ -23,3 +23,8 @@ void __attribute__((weak)) convert_vmstate_intel_to_amd(void)
 {
     /* No conversion needed for non-x86 targets */
 }
+
+void __attribute__((weak)) convert_vmstate_amd_to_intel(void)
+{
+    /* No conversion needed for non-x86 targets */
+}

@@ -1823,3 +1823,16 @@ void convert_vmstate_intel_to_amd(void)
         env->nested_state->format = KVM_STATE_NESTED_FORMAT_SVM;
     }
 }
+
+void convert_vmstate_amd_to_intel(void)
+{
+    printf("[mIA] Converting VM state from AMD to Intel...\n");
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        X86CPU *x86_cpu = X86_CPU(cpu);
+        CPUX86State *env = &x86_cpu->env;
+        env->cr[4] &= ~0x2000;
+        env->nested_state->format = KVM_STATE_NESTED_FORMAT_VMX;
+    }
+}

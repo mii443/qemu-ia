@@ -3205,6 +3205,10 @@ int qemu_loadvm_state(QEMUFile *f)
         convert_vmstate_intel_to_amd();
     }
 
+    if (migrate_amd_to_intel()) {
+        convert_vmstate_amd_to_intel();
+    }
+
     printf("[mIA] cpu_synchronize_all_post_init start\n");
     cpu_synchronize_all_post_init();
     printf("[mIA] cpu_synchronize_all_post_init end\n");
