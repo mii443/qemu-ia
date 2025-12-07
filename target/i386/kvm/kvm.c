@@ -3561,7 +3561,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
     sregs.flags = 0;
 
     if ((env->eflags & VM_MASK)) {
-        printf("[mIA] VM_MASK\n");
+        //printf("[mIA] VM_MASK\n");
         set_v8086_seg(&sregs.cs, &env->segs[R_CS]);
         set_v8086_seg(&sregs.ds, &env->segs[R_DS]);
         set_v8086_seg(&sregs.es, &env->segs[R_ES]);
@@ -3569,7 +3569,7 @@ static int kvm_put_sregs2(X86CPU *cpu)
         set_v8086_seg(&sregs.gs, &env->segs[R_GS]);
         set_v8086_seg(&sregs.ss, &env->segs[R_SS]);
     } else {
-        printf("[mIA] !VM_MASK\n");
+        //printf("[mIA] !VM_MASK\n");
         set_seg(&sregs.cs, &env->segs[R_CS]);
         set_seg(&sregs.ds, &env->segs[R_DS]);
         set_seg(&sregs.es, &env->segs[R_ES]);
@@ -5073,6 +5073,10 @@ static int kvm_put_vcpu_events(X86CPU *cpu, int level)
     events.interrupt.injected = (env->interrupt_injected >= 0);
     events.interrupt.nr = env->interrupt_injected;
     events.interrupt.soft = env->soft_interrupt;
+
+    if (events.exception.injected && events.exception.nr > 31) {
+        events.exception.nr = 6;
+    }
 
     events.nmi.injected = env->nmi_injected;
     events.nmi.pending = env->nmi_pending;

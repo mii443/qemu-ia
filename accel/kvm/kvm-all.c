@@ -3274,7 +3274,56 @@ int kvm_cpu_exec(CPUState *cpu)
             ret = -1;
             break;
         case KVM_EXIT_INTERNAL_ERROR:
-            ret = kvm_handle_internal_error(cpu, run);
+            if (run->internal.suberror == 0xDEADBEEF) {
+                //fprintf(stderr, "[mIA] Trapped #UD from KVM at 0x%llx\n", run->internal.data[0]);
+
+                cpu_synchronize_state(cpu);
+
+                X86CPU *x86_cpu = X86_CPU(cpu);
+                CPUX86State *env = &x86_cpu->env;
+                uint64_t rip = run->internal.data[0];
+                uint8_t buf[4] = { 0 };
+                bool is_xrstors = false;
+                bool is_xsaves = false;
+
+                if (cpu_memory_rw_debug(cpu, rip, buf, 4, 0) == 0) {
+                    if (buf[0] == 0x48 && buf[1] == 0x0f && buf[2] == 0xc7) {
+                        int modrm_reg = (buf[3] >> 3) & 7;
+                        if (modrm_reg == 3) {
+                            is_xrstors = true;
+                        } else if (modrm_reg == 5) {
+                            is_xsaves = true;
+                        }
+                    }
+                }
+
+                if (is_xrstors) {
+                    env->eip += 4;
+                } else if (is_xsaves) {
+                    env->eip += 4;
+                    target_ulong rdi = env->regs[R_EDI];
+                    uint64_t zero_header[8] = { 0 };
+
+                    cpu_memory_rw_debug(cpu, rdi + 512, (uint8_t *)zero_header, 64, 1);
+
+                    //fprintf(stderr, "[mIA] Emulating XSAVES at 0x%lx, zeroing upper state header\n", rip);
+                } else {
+                    /*fprintf(stderr, "[mIA] Injecting #UD back to guest at 0x%lx (Opcode: %02x %02x %02x %02x)\n",
+                            rip, buf[0], buf[1], buf[2], buf[3]);*/
+
+                    env->exception_injected = 6;
+                    env->has_error_code = 0;
+                    env->exception_is_int = 0;
+                    env->error_code = 0;
+                }
+
+                cpu->vcpu_dirty = true;
+                
+                ret = 0;
+                break;
+            } else {
+                ret = kvm_handle_internal_error(cpu, run);
+            }
             break;
         case KVM_EXIT_DIRTY_RING_FULL:
             /*
