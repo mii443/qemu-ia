@@ -277,3 +277,74 @@ void x86_cpu_xrstor_all_areas(X86CPU *cpu, const void *buf, uint32_t buflen)
     }
 #endif
 }
+
+void clear_avx512_xsave_state(void *buf, uint32_t buflen)
+{
+    X86XSaveHeader *header = buf + 512;
+    const ExtSaveArea *e;
+
+    // xstate_bvからAVX-512ビットをクリア
+    header->xstate_bv &= ~0xe0ULL;
+    header->xcomp_bv &= ~0xe0ULL;
+
+    // AVX-512状態領域をゼロクリア（安全のため）
+    e = &x86_ext_save_areas[XSTATE_OPMASK_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        memset(buf + e->offset, 0, e->size);
+    }
+
+    e = &x86_ext_save_areas[XSTATE_ZMM_Hi256_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        memset(buf + e->offset, 0, e->size);
+    }
+
+    e = &x86_ext_save_areas[XSTATE_Hi16_ZMM_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        memset(buf + e->offset, 0, e->size);
+    }
+}
+
+void supplement_avx512_xsave_state(X86CPU *cpu, void *buf, uint32_t buflen)
+{
+    CPUX86State *env = &cpu->env;
+    X86XSaveHeader *header = buf + 512;
+    const ExtSaveArea *e;
+    int i;
+
+    // shadow_xcr0にAVX-512ビットが含まれている場合のみ補完
+    if (!(env->xcr0 & 0xe0ULL)) {
+        return;
+    }
+
+    // xstate_bvにAVX-512ビットを追加
+    header->xstate_bv |= (env->xcr0 & 0xe0ULL);
+
+    // OPMASK registers
+    e = &x86_ext_save_areas[XSTATE_OPMASK_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        XSaveOpmask *opmask = buf + e->offset;
+        memcpy(&opmask->opmask_regs, env->opmask_regs, sizeof(env->opmask_regs));
+    }
+
+    // ZMM_Hi256
+    e = &x86_ext_save_areas[XSTATE_ZMM_Hi256_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        XSaveZMM_Hi256 *zmm_hi256 = buf + e->offset;
+        for (i = 0; i < CPU_NB_REGS; i++) {
+            uint8_t *zmmh = zmm_hi256->zmm_hi256[i];
+            stq_p(zmmh,      env->xmm_regs[i].ZMM_Q(4));
+            stq_p(zmmh + 8,  env->xmm_regs[i].ZMM_Q(5));
+            stq_p(zmmh + 16, env->xmm_regs[i].ZMM_Q(6));
+            stq_p(zmmh + 24, env->xmm_regs[i].ZMM_Q(7));
+        }
+    }
+
+#ifdef TARGET_X86_64
+    // Hi16_ZMM
+    e = &x86_ext_save_areas[XSTATE_Hi16_ZMM_BIT];
+    if (e->size && e->offset && e->offset + e->size <= buflen) {
+        XSaveHi16_ZMM *hi16_zmm = buf + e->offset;
+        memcpy(&hi16_zmm->hi16_zmm, &env->xmm_regs[16], 16 * sizeof(env->xmm_regs[16]));
+    }
+#endif
+}

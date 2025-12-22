@@ -3482,6 +3482,9 @@ static int kvm_put_xsave(X86CPU *cpu)
 
     x86_cpu_xsave_all_areas(cpu, xsave, env->xsave_buf_len);
 
+    // AVX-512状態をクリア（ハードウェアがサポートしない場合）
+    clear_avx512_xsave_state(xsave, env->xsave_buf_len);
+
     return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_XSAVE, xsave);
 }
 
@@ -4278,6 +4281,10 @@ static int kvm_get_xsave(X86CPU *cpu)
     if (ret < 0) {
         return ret;
     }
+
+    // AVX-512状態を補完（シャドウXCR0に基づいて）
+    supplement_avx512_xsave_state(cpu, xsave, env->xsave_buf_len);
+
     x86_cpu_xrstor_all_areas(cpu, xsave, env->xsave_buf_len);
 
     return 0;

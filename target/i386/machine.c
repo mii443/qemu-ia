@@ -1838,6 +1838,7 @@ void convert_vmstate_amd_to_intel(void)
         env->efer &= ~MSR_EFER_SVME; // disable svme
         env->features[FEAT_7_0_EBX] |= CPUID_7_0_EBX_SMAP;
         //env->nested_state->format = KVM_STATE_NESTED_FORMAT_VMX;
+        env->xstate_bv &= ~0xe0;
     }
     printf("[mIA] Converted.\n");
 }

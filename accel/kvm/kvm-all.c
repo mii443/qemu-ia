@@ -3153,6 +3153,138 @@ out_unref:
     return ret;
 }
 
+typedef enum {
+    EVEX_OK = 0,
+    EVEX_ERR_LEN = -1,
+    EVEX_ERR_NOT_EVEX = -2,
+    EVEX_ERR_RESERVED_BIT = -3,
+    EVEX_ERR_FIXED_BIT = -4,
+} evex_status_t;
+
+typedef struct {
+    /* Raw bytes */
+    uint8_t byte0; /* must be 0x62 */
+    uint8_t p0;
+    uint8_t p1;
+    uint8_t p2;
+
+    /* Extracted (as stored in the stream; i.e., may be inverted per SDM) */
+    uint8_t R;      /* P0[7] */
+    uint8_t X;      /* P0[6] */
+    uint8_t B;      /* P0[5] */
+    uint8_t Rp;     /* P0[4]  (R') */
+    uint8_t mmm;    /* P0[2:0] */
+
+    uint8_t W;      /* P1[7] */
+    uint8_t vvvv;   /* P1[6:3] */
+    uint8_t pp;     /* P1[1:0] */
+
+    uint8_t z;      /* P2[7] */
+    uint8_t Lp;     /* P2[6] (L') */
+    uint8_t L;      /* P2[5] */
+    uint8_t b;      /* P2[4] */
+    uint8_t Vp;     /* P2[3] (V') */
+    uint8_t aaa;    /* P2[2:0] */
+
+    /* Decoded (de-inverted) variants for the inverted fields */
+    uint8_t R_dec;   /* ~R & 1 */
+    uint8_t X_dec;   /* ~X & 1 */
+    uint8_t B_dec;   /* ~B & 1 */
+    uint8_t Rp_dec;  /* ~Rp & 1 */
+    uint8_t vvvv_dec;/* ~vvvv & 0xF */
+    uint8_t Vp_dec;  /* ~Vp & 1 */
+} evex_prefix_t;
+
+static inline uint8_t bit_u8(uint8_t x, unsigned b) { return (uint8_t)((x >> b) & 1u); }
+static inline uint8_t bits_u8(uint8_t x, unsigned hi, unsigned lo) {
+    return (uint8_t)((x >> lo) & ((1u << (hi - lo + 1u)) - 1u));
+}
+
+bool is_evex_prefix(uint8_t *instr);
+bool is_evex_prefix(uint8_t *instr)
+{
+    return (instr[0] == 0x62);
+}
+
+evex_status_t evex_parse_prefix(const uint8_t *buf, size_t len, evex_prefix_t *out);
+evex_status_t evex_parse_prefix(const uint8_t *buf, size_t len, evex_prefix_t *out) {
+    if (!buf || !out) return EVEX_ERR_LEN;
+    if (len < 4) return EVEX_ERR_LEN;
+
+    if (buf[0] != 0x62) return EVEX_ERR_NOT_EVEX;
+
+    const uint8_t p0 = buf[1];
+    const uint8_t p1 = buf[2];
+    const uint8_t p2 = buf[3];
+
+    /* Check reserved/fixed bits per SDM:
+       - P[3] must be 0  => P0 bit3
+       - P[10] must be 1 => P1 bit2
+    */
+    if (bit_u8(p0, 3) != 0) return EVEX_ERR_RESERVED_BIT;
+    if (bit_u8(p1, 2) != 1) return EVEX_ERR_FIXED_BIT;
+
+    out->byte0 = buf[0];
+    out->p0 = p0;
+    out->p1 = p1;
+    out->p2 = p2;
+
+    /* Stored fields */
+    out->R   = bit_u8(p0, 7);
+    out->X   = bit_u8(p0, 6);
+    out->B   = bit_u8(p0, 5);
+    out->Rp  = bit_u8(p0, 4);
+    out->mmm = bits_u8(p0, 2, 0);
+
+    out->W    = bit_u8(p1, 7);
+    out->vvvv = bits_u8(p1, 6, 3);
+    out->pp   = bits_u8(p1, 1, 0);
+
+    out->z   = bit_u8(p2, 7);
+    out->Lp  = bit_u8(p2, 6);
+    out->L   = bit_u8(p2, 5);
+    out->b   = bit_u8(p2, 4);
+    out->Vp  = bit_u8(p2, 3);
+    out->aaa = bits_u8(p2, 2, 0);
+
+    /* De-invert (Intel SDM: these are stored inverted) */
+    out->R_dec    = (uint8_t)(out->R  ^ 1u);
+    out->X_dec    = (uint8_t)(out->X  ^ 1u);
+    out->B_dec    = (uint8_t)(out->B  ^ 1u);
+    out->Rp_dec   = (uint8_t)(out->Rp ^ 1u);
+    out->vvvv_dec = (uint8_t)(out->vvvv ^ 0xFu);
+    out->Vp_dec   = (uint8_t)(out->Vp ^ 1u);
+
+    return EVEX_OK;
+}
+
+void kvm_print_evex_prefix(evex_prefix_t *evex);
+void kvm_print_evex_prefix(evex_prefix_t *evex) {
+    if (!evex) return;
+    printf("EVEX Prefix:\n");
+    printf("  Raw Bytes: %02X %02X %02X %02X\n",
+           evex->byte0, evex->p0, evex->p1, evex->p2);
+    printf("  Fields:\n");
+    printf("    R: %u (dec: %u)\n", evex->R, evex->R_dec);
+    printf("    X: %u (dec: %u)\n", evex->X, evex->X_dec);
+    printf("    B: %u (dec: %u)\n", evex->B, evex->B_dec);
+    printf("    Rp: %u (dec: %u)\n", evex->Rp, evex->Rp_dec);
+    printf("    mmm: %u\n", evex->mmm);
+    printf("    W: %u\n", evex->W);
+    printf("    vvvv: %u (dec: %u)\n", evex->vvvv, evex->vvvv_dec);
+    printf("    pp: %u\n", evex->pp);
+    printf("    z: %u\n", evex->z);
+    printf("    Lp: %u\n", evex->Lp);
+    printf("    L: %u\n", evex->L);
+    printf("    b: %u\n", evex->b);
+    printf("    Vp: %u (dec: %u)\n", evex->Vp, evex->Vp_dec);
+    printf("    aaa: %u\n", evex->aaa);
+}
+
+// global variable to manage virtual ZMM register
+// zmm0 - zmm31
+float zmm_registers[32][16] = { {1000.0f} };
+
 int kvm_cpu_exec(CPUState *cpu)
 {
     struct kvm_run *run = cpu->kvm_run;
@@ -3274,7 +3406,7 @@ int kvm_cpu_exec(CPUState *cpu)
             ret = -1;
             break;
         case KVM_EXIT_INTERNAL_ERROR:
-            if (run->internal.suberror == 0xDEADBEEF) {
+            if (run->internal.suberror == 0xDEADBEEF) { // Handle Invalid Opcode #UD
                 //fprintf(stderr, "[mIA] Trapped #UD from KVM at 0x%llx\n", run->internal.data[0]);
 
                 cpu_synchronize_state(cpu);
@@ -3282,11 +3414,365 @@ int kvm_cpu_exec(CPUState *cpu)
                 X86CPU *x86_cpu = X86_CPU(cpu);
                 CPUX86State *env = &x86_cpu->env;
                 uint64_t rip = run->internal.data[0];
-                uint8_t buf[4] = { 0 };
+                uint8_t buf[15] = { 0 };
                 bool is_xrstors = false;
                 bool is_xsaves = false;
+                bool skip_inject_ud = false;
+                uint64_t skip_rip = 0;
 
-                if (cpu_memory_rw_debug(cpu, rip, buf, 4, 0) == 0) {
+                if (cpu_memory_rw_debug(cpu, rip, buf, 15, 0) == 0) {
+                    if (buf[0] == 0x62) {
+                        // EVEX
+                        //fprintf(stderr, "[mIA] EVEX (Opcode: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x)\n", buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7],buf[8],buf[9],buf[10],buf[11],buf[12],buf[13],buf[14]);
+                        evex_prefix_t ev = {0};
+                        evex_status_t ev_status = evex_parse_prefix(buf, 15, &ev);
+                        if (ev_status == EVEX_OK) {
+                            //kvm_print_evex_prefix(&ev);
+                            if (buf[4] == 0x11) { // VMOVUPS
+                                uint8_t modrm = buf[5];
+                                uint8_t mod = (modrm >> 6) & 0b11;
+                                uint8_t reg = (modrm >> 3) & 0b111;
+                                uint8_t rm  = (modrm >> 0) & 0b111;
+
+                                // VMOVUPS: Store ZMM register to memory
+                                // Calculate source ZMM register number (0-31)
+                                // reg encoding: [R'][R][reg2:reg0]
+                                uint8_t src_zmm = reg | (ev.R_dec << 3) | (ev.Rp_dec << 4);
+
+                                // Calculate destination memory address from ModR/M
+                                target_ulong dest_addr = 0;
+
+                                if (mod == 0b11) {
+                                    // Register-to-register (not typical for VMOVUPS store)
+                                    fprintf(stderr, "[mIA] VMOVUPS reg-to-reg not implemented\n");
+                                } else if (mod == 0b00) {
+                                    // [reg] - indirect
+                                    if (rm == 0b100) {
+                                        // SIB byte present
+                                        uint8_t sib = buf[6];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        // Extended base with EVEX.B
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        if (base_ext < 16) {
+                                            dest_addr = env->regs[base_ext];
+                                        }
+                                        if (index != 0b100) { // RSP cannot be index
+                                            dest_addr += env->regs[index_ext] << scale;
+                                        }
+                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
+                                    } else {
+                                        // Direct register
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        dest_addr = env->regs[base_ext];
+                                        skip_rip = 6; // EVEX(4) + opcode(1) + ModRM(1)
+                                    }
+                                } else if (mod == 0b01) {
+                                    // [reg + disp8]
+                                    if (rm == 0b100) {
+                                        // SIB + disp8
+                                        uint8_t sib = buf[6];
+                                        int8_t disp8 = (int8_t)buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        dest_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            dest_addr += env->regs[index_ext] << scale;
+                                        }
+                                        dest_addr += disp8;
+                                        skip_rip = 8; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp8(1)
+                                    } else {
+                                        int8_t disp8 = (int8_t)buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        dest_addr = env->regs[base_ext] + disp8;
+                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + disp8(1)
+                                    }
+                                } else if (mod == 0b10) {
+                                    // [reg + disp32]
+                                    if (rm == 0b100) {
+                                        // SIB + disp32
+                                        uint8_t sib = buf[6];
+                                        int32_t disp32 = *(int32_t*)&buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        dest_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            dest_addr += env->regs[index_ext] << scale;
+                                        }
+                                        dest_addr += disp32;
+                                        skip_rip = 11; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp32(4)
+                                    } else {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        dest_addr = env->regs[base_ext] + disp32;
+                                        skip_rip = 10; // EVEX(4) + opcode(1) + ModRM(1) + disp32(4)
+                                    }
+                                }
+
+                                // Write ZMM register to memory (512 bits = 64 bytes)
+                                if (mod != 0b11 && src_zmm < 32) {
+                                    cpu_memory_rw_debug(cpu, dest_addr, (uint8_t*)zmm_registers[src_zmm], 64, 1);
+                                    //fprintf(stderr, "[mIA] VMOVUPS: zmm%d -> [0x%" PRIx64 "]\n", src_zmm, (uint64_t)dest_addr);
+                                }
+                            } else if (buf[4] == 0x10) { // VMOVUPS (Load)
+                                uint8_t modrm = buf[5];
+                                uint8_t mod = (modrm >> 6) & 0b11;
+                                uint8_t reg = (modrm >> 3) & 0b111;
+                                uint8_t rm  = (modrm >> 0) & 0b111;
+
+                                // VMOVUPS: Load from memory to ZMM register
+                                // Calculate destination ZMM register number (0-31)
+                                // reg encoding: [R'][R][reg2:reg0]
+                                uint8_t dest_zmm = reg | (ev.R_dec << 3) | (ev.Rp_dec << 4);
+
+                                // Calculate source memory address from ModR/M
+                                target_ulong src_addr = 0;
+
+                                if (mod == 0b11) {
+                                    // Register-to-register (not typical for VMOVUPS load from memory)
+                                    fprintf(stderr, "[mIA] VMOVUPS load reg-to-reg not implemented\n");
+                                } else if (mod == 0b00) {
+                                    // [reg] - indirect
+                                    if (rm == 0b100) {
+                                        // SIB byte present
+                                        uint8_t sib = buf[6];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        // Extended base with EVEX.B
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        if (base_ext < 16) {
+                                            src_addr = env->regs[base_ext];
+                                        }
+                                        if (index != 0b100) { // RSP cannot be index
+                                            src_addr += env->regs[index_ext] << scale;
+                                        }
+                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
+                                    } else {
+                                        // Direct register
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src_addr = env->regs[base_ext];
+                                        skip_rip = 6; // EVEX(4) + opcode(1) + ModRM(1)
+                                    }
+                                } else if (mod == 0b01) {
+                                    // [reg + disp8]
+                                    if (rm == 0b100) {
+                                        // SIB + disp8
+                                        uint8_t sib = buf[6];
+                                        int8_t disp8 = (int8_t)buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        src_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            src_addr += env->regs[index_ext] << scale;
+                                        }
+                                        src_addr += disp8;
+                                        skip_rip = 8; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp8(1)
+                                    } else {
+                                        int8_t disp8 = (int8_t)buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src_addr = env->regs[base_ext] + disp8;
+                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + disp8(1)
+                                    }
+                                } else if (mod == 0b10) {
+                                    // [reg + disp32]
+                                    if (rm == 0b100) {
+                                        // SIB + disp32
+                                        uint8_t sib = buf[6];
+                                        int32_t disp32 = *(int32_t*)&buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        src_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            src_addr += env->regs[index_ext] << scale;
+                                        }
+                                        src_addr += disp32;
+                                        skip_rip = 11; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp32(4)
+                                    } else {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src_addr = env->regs[base_ext] + disp32;
+                                        skip_rip = 10; // EVEX(4) + opcode(1) + ModRM(1) + disp32(4)
+                                    }
+                                }
+
+                                // Read from memory to ZMM register (512 bits = 64 bytes)
+                                if (mod != 0b11 && dest_zmm < 32) {
+                                    cpu_memory_rw_debug(cpu, src_addr, (uint8_t*)zmm_registers[dest_zmm], 64, 0);
+                                    // fprintf(stderr, "[mIA] VMOVUPS: [0x%" PRIx64 "] -> zmm%d\n", (uint64_t)src_addr, dest_zmm);
+                                }
+                            } else if (buf[4] == 0x58) { // VADDPS
+                                uint8_t modrm = buf[5];
+                                uint8_t mod = (modrm >> 6) & 0b11;
+                                uint8_t reg = (modrm >> 3) & 0b111;
+                                uint8_t rm  = (modrm >> 0) & 0b111;
+
+                                // VADDPS: zmm1 = zmm2 + zmm3/m512
+                                // Calculate destination ZMM register number (0-31)
+                                uint8_t dest_zmm = reg | (ev.R_dec << 3) | (ev.Rp_dec << 4);
+
+                                // Calculate source1 ZMM register from EVEX.vvvv (inverted)
+                                uint8_t src1_zmm = ev.vvvv_dec | (ev.Vp_dec << 4);
+
+                                // Calculate source2 ZMM register or memory address
+                                uint8_t src2_zmm = rm | (ev.B_dec << 3);
+
+                                float src2_data[16];
+                                target_ulong src2_addr = 0;
+
+                                if (mod == 0b11) {
+                                    // Register-to-register: zmm1 = zmm2 + zmm3
+                                    if (dest_zmm < 32 && src1_zmm < 32 && src2_zmm < 32) {
+                                        for (int i = 0; i < 16; i++) {
+                                            zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + zmm_registers[src2_zmm][i];
+                                        }
+                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + zmm%d\n", dest_zmm, src1_zmm, src2_zmm);
+                                    }
+                                    skip_rip = 6; // EVEX(4) + opcode(1) + ModRM(1)
+                                } else if (mod == 0b00) {
+                                    // Memory source: zmm1 = zmm2 + [mem]
+                                    if (rm == 0b100) {
+                                        // SIB byte present
+                                        uint8_t sib = buf[6];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        if (base_ext < 16) {
+                                            src2_addr = env->regs[base_ext];
+                                        }
+                                        if (index != 0b100) {
+                                            src2_addr += env->regs[index_ext] << scale;
+                                        }
+                                        skip_rip = 7;
+                                    } else {
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src2_addr = env->regs[base_ext];
+                                        skip_rip = 6;
+                                    }
+
+                                    // Load from memory
+                                    cpu_memory_rw_debug(cpu, src2_addr, (uint8_t*)src2_data, 64, 0);
+
+                                    // Perform addition
+                                    if (dest_zmm < 32 && src1_zmm < 32) {
+                                        for (int i = 0; i < 16; i++) {
+                                            zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + src2_data[i];
+                                        }
+                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + [0x%" PRIx64 "]\n", dest_zmm, src1_zmm, (uint64_t)src2_addr);
+                                    }
+                                } else if (mod == 0b01) {
+                                    // [reg + disp8]
+                                    if (rm == 0b100) {
+                                        uint8_t sib = buf[6];
+                                        int8_t disp8 = (int8_t)buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        src2_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            src2_addr += env->regs[index_ext] << scale;
+                                        }
+                                        src2_addr += disp8;
+                                        skip_rip = 8;
+                                    } else {
+                                        int8_t disp8 = (int8_t)buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src2_addr = env->regs[base_ext] + disp8;
+                                        skip_rip = 7;
+                                    }
+
+                                    cpu_memory_rw_debug(cpu, src2_addr, (uint8_t*)src2_data, 64, 0);
+
+                                    if (dest_zmm < 32 && src1_zmm < 32) {
+                                        for (int i = 0; i < 16; i++) {
+                                            zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + src2_data[i];
+                                        }
+                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + [0x%" PRIx64 "]\n", dest_zmm, src1_zmm, (uint64_t)src2_addr);
+                                    }
+                                } else if (mod == 0b10) {
+                                    // [reg + disp32]
+                                    if (rm == 0b100) {
+                                        uint8_t sib = buf[6];
+                                        int32_t disp32 = *(int32_t*)&buf[7];
+                                        uint8_t scale = (sib >> 6) & 0b11;
+                                        uint8_t index = (sib >> 3) & 0b111;
+                                        uint8_t base  = (sib >> 0) & 0b111;
+
+                                        uint8_t base_ext = base | (ev.B_dec << 3);
+                                        uint8_t index_ext = index | (ev.X_dec << 3);
+
+                                        src2_addr = env->regs[base_ext];
+                                        if (index != 0b100) {
+                                            src2_addr += env->regs[index_ext] << scale;
+                                        }
+                                        src2_addr += disp32;
+                                        skip_rip = 11;
+                                    } else {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint8_t base_ext = rm | (ev.B_dec << 3);
+                                        src2_addr = env->regs[base_ext] + disp32;
+                                        skip_rip = 10;
+                                    }
+
+                                    cpu_memory_rw_debug(cpu, src2_addr, (uint8_t*)src2_data, 64, 0);
+
+                                    if (dest_zmm < 32 && src1_zmm < 32) {
+                                        for (int i = 0; i < 16; i++) {
+                                            zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + src2_data[i];
+                                        }
+                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + [0x%" PRIx64 "]\n", dest_zmm, src1_zmm, (uint64_t)src2_addr);
+                                    }
+                                }
+                            }
+
+                            // Set default skip_rip if not already set by instruction handler
+                            if (skip_rip == 0) {
+                                skip_rip = 6;
+                            }
+                        }
+                        skip_inject_ud = true;
+                    }
+                    if (skip_inject_ud) {
+                        env->eip += skip_rip;
+                        cpu->vcpu_dirty = true;
+                        ret = 0;
+                        break;
+                    }
                     if (buf[0] == 0x48 && buf[1] == 0x0f && buf[2] == 0xc7) {
                         int modrm_reg = (buf[3] >> 3) & 7;
                         if (modrm_reg == 3) {
@@ -3296,6 +3782,8 @@ int kvm_cpu_exec(CPUState *cpu)
                         }
                     }
                 }
+
+                
 
                 if (is_xrstors) {
                     env->eip += 4;
@@ -3308,8 +3796,8 @@ int kvm_cpu_exec(CPUState *cpu)
 
                     //fprintf(stderr, "[mIA] Emulating XSAVES at 0x%lx, zeroing upper state header\n", rip);
                 } else {
-                    /*fprintf(stderr, "[mIA] Injecting #UD back to guest at 0x%lx (Opcode: %02x %02x %02x %02x)\n",
-                            rip, buf[0], buf[1], buf[2], buf[3]);*/
+                    fprintf(stderr, "[mIA] Injecting #UD back to guest at 0x%lx (Opcode: %02x %02x %02x %02x)\n",
+                            rip, buf[0], buf[1], buf[2], buf[3]);
 
                     env->exception_injected = 6;
                     env->has_error_code = 0;
