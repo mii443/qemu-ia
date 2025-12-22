@@ -1839,6 +1839,9 @@ void convert_vmstate_amd_to_intel(void)
         env->features[FEAT_7_0_EBX] |= CPUID_7_0_EBX_SMAP;
         //env->nested_state->format = KVM_STATE_NESTED_FORMAT_VMX;
         env->xstate_bv &= ~0xe0;
+
+        printf("[mIA] KVM_EMULATE_AVX512 ioctl\n");
+        kvm_vcpu_ioctl(CPU(cpu), KVM_EMULATE_AVX512, true);
     }
     printf("[mIA] Converted.\n");
 }
