@@ -3281,6 +3281,17 @@ void kvm_print_evex_prefix(evex_prefix_t *evex) {
     printf("    aaa: %u\n", evex->aaa);
 }
 
+static int get_evex_disp8_scale(evex_prefix_t *ev, uint8_t opcode) {
+    int vl_bits = (ev->Lp << 1) | ev->L;
+
+    switch (vl_bits) {
+        case 0b00: return 16;  // 128-bit (XMM)
+        case 0b01: return 32;  // 256-bit (YMM)
+        case 0b10: return 64;  // 512-bit (ZMM)
+        default: return 1;
+    }
+}
+
 // global variable to manage virtual ZMM register
 // zmm0 - zmm31
 float zmm_registers[32][16] = { {1000.0f} };
@@ -3428,22 +3439,17 @@ int kvm_cpu_exec(CPUState *cpu)
                         evex_status_t ev_status = evex_parse_prefix(buf, 15, &ev);
                         if (ev_status == EVEX_OK) {
                             //kvm_print_evex_prefix(&ev);
-                            if (buf[4] == 0x11) { // VMOVUPS
+                            if (buf[4] == 0x11) { // VMOVUPS Store
                                 uint8_t modrm = buf[5];
                                 uint8_t mod = (modrm >> 6) & 0b11;
                                 uint8_t reg = (modrm >> 3) & 0b111;
                                 uint8_t rm  = (modrm >> 0) & 0b111;
 
-                                // VMOVUPS: Store ZMM register to memory
-                                // Calculate source ZMM register number (0-31)
-                                // reg encoding: [R'][R][reg2:reg0]
                                 uint8_t src_zmm = reg | (ev.R_dec << 3) | (ev.Rp_dec << 4);
-
-                                // Calculate destination memory address from ModR/M
                                 target_ulong dest_addr = 0;
 
                                 if (mod == 0b11) {
-                                    // Register-to-register (not typical for VMOVUPS store)
+                                    // Register-to-register
                                     fprintf(stderr, "[mIA] VMOVUPS reg-to-reg not implemented\n");
                                 } else if (mod == 0b00) {
                                     // [reg] - indirect
@@ -3454,17 +3460,30 @@ int kvm_cpu_exec(CPUState *cpu)
                                         uint8_t index = (sib >> 3) & 0b111;
                                         uint8_t base  = (sib >> 0) & 0b111;
 
-                                        // Extended base with EVEX.B
                                         uint8_t base_ext = base | (ev.B_dec << 3);
                                         uint8_t index_ext = index | (ev.X_dec << 3);
 
-                                        if (base_ext < 16) {
-                                            dest_addr = env->regs[base_ext];
+                                        if (base == 0b101) {
+                                            int32_t disp32 = *(int32_t*)&buf[7];
+                                            dest_addr = disp32;
+                                            if (index != 0b100) {
+                                                dest_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 11; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp32(4)
+                                        } else {
+                                            if (base_ext < 16) {
+                                                dest_addr = env->regs[base_ext];
+                                            }
+                                            if (index != 0b100) {
+                                                dest_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
                                         }
-                                        if (index != 0b100) { // RSP cannot be index
-                                            dest_addr += env->regs[index_ext] << scale;
-                                        }
-                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
+                                    } else if (rm == 0b101) {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint64_t next_rip = rip + 10; // EVEX(4) + opcode(1) + ModRM(1) + disp32(4)
+                                        dest_addr = next_rip + disp32;
+                                        skip_rip = 10;
                                     } else {
                                         // Direct register
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
@@ -3474,7 +3493,6 @@ int kvm_cpu_exec(CPUState *cpu)
                                 } else if (mod == 0b01) {
                                     // [reg + disp8]
                                     if (rm == 0b100) {
-                                        // SIB + disp8
                                         uint8_t sib = buf[6];
                                         int8_t disp8 = (int8_t)buf[7];
                                         uint8_t scale = (sib >> 6) & 0b11;
@@ -3488,12 +3506,12 @@ int kvm_cpu_exec(CPUState *cpu)
                                         if (index != 0b100) {
                                             dest_addr += env->regs[index_ext] << scale;
                                         }
-                                        dest_addr += disp8;
+                                        dest_addr += disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 8; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp8(1)
                                     } else {
                                         int8_t disp8 = (int8_t)buf[6];
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
-                                        dest_addr = env->regs[base_ext] + disp8;
+                                        dest_addr = env->regs[base_ext] + disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + disp8(1)
                                     }
                                 } else if (mod == 0b10) {
@@ -3528,22 +3546,17 @@ int kvm_cpu_exec(CPUState *cpu)
                                     cpu_memory_rw_debug(cpu, dest_addr, (uint8_t*)zmm_registers[src_zmm], 64, 1);
                                     //fprintf(stderr, "[mIA] VMOVUPS: zmm%d -> [0x%" PRIx64 "]\n", src_zmm, (uint64_t)dest_addr);
                                 }
-                            } else if (buf[4] == 0x10) { // VMOVUPS (Load)
+                            } else if (buf[4] == 0x10) { // VMOVUPS Load
                                 uint8_t modrm = buf[5];
                                 uint8_t mod = (modrm >> 6) & 0b11;
                                 uint8_t reg = (modrm >> 3) & 0b111;
                                 uint8_t rm  = (modrm >> 0) & 0b111;
 
-                                // VMOVUPS: Load from memory to ZMM register
-                                // Calculate destination ZMM register number (0-31)
-                                // reg encoding: [R'][R][reg2:reg0]
                                 uint8_t dest_zmm = reg | (ev.R_dec << 3) | (ev.Rp_dec << 4);
-
-                                // Calculate source memory address from ModR/M
                                 target_ulong src_addr = 0;
 
                                 if (mod == 0b11) {
-                                    // Register-to-register (not typical for VMOVUPS load from memory)
+                                    // Register-to-register
                                     fprintf(stderr, "[mIA] VMOVUPS load reg-to-reg not implemented\n");
                                 } else if (mod == 0b00) {
                                     // [reg] - indirect
@@ -3554,17 +3567,30 @@ int kvm_cpu_exec(CPUState *cpu)
                                         uint8_t index = (sib >> 3) & 0b111;
                                         uint8_t base  = (sib >> 0) & 0b111;
 
-                                        // Extended base with EVEX.B
                                         uint8_t base_ext = base | (ev.B_dec << 3);
                                         uint8_t index_ext = index | (ev.X_dec << 3);
 
-                                        if (base_ext < 16) {
-                                            src_addr = env->regs[base_ext];
+                                        if (base == 0b101) {
+                                            int32_t disp32 = *(int32_t*)&buf[7];
+                                            src_addr = disp32;
+                                            if (index != 0b100) {
+                                                src_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 11; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp32(4)
+                                        } else {
+                                            if (base_ext < 16) {
+                                                src_addr = env->regs[base_ext];
+                                            }
+                                            if (index != 0b100) { // RSP cannot be index
+                                                src_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
                                         }
-                                        if (index != 0b100) { // RSP cannot be index
-                                            src_addr += env->regs[index_ext] << scale;
-                                        }
-                                        skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1)
+                                    } else if (rm == 0b101) {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint64_t next_rip = rip + 10; // EVEX(4) + opcode(1) + ModRM(1) + disp32(4)
+                                        src_addr = next_rip + disp32;
+                                        skip_rip = 10;
                                     } else {
                                         // Direct register
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
@@ -3574,7 +3600,6 @@ int kvm_cpu_exec(CPUState *cpu)
                                 } else if (mod == 0b01) {
                                     // [reg + disp8]
                                     if (rm == 0b100) {
-                                        // SIB + disp8
                                         uint8_t sib = buf[6];
                                         int8_t disp8 = (int8_t)buf[7];
                                         uint8_t scale = (sib >> 6) & 0b11;
@@ -3588,12 +3613,12 @@ int kvm_cpu_exec(CPUState *cpu)
                                         if (index != 0b100) {
                                             src_addr += env->regs[index_ext] << scale;
                                         }
-                                        src_addr += disp8;
+                                        src_addr += disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 8; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp8(1)
                                     } else {
                                         int8_t disp8 = (int8_t)buf[6];
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
-                                        src_addr = env->regs[base_ext] + disp8;
+                                        src_addr = env->regs[base_ext] + disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 7; // EVEX(4) + opcode(1) + ModRM(1) + disp8(1)
                                     }
                                 } else if (mod == 0b10) {
@@ -3657,7 +3682,7 @@ int kvm_cpu_exec(CPUState *cpu)
                                     }
                                     skip_rip = 6; // EVEX(4) + opcode(1) + ModRM(1)
                                 } else if (mod == 0b00) {
-                                    // Memory source: zmm1 = zmm2 + [mem]
+                                    // Memory source
                                     if (rm == 0b100) {
                                         // SIB byte present
                                         uint8_t sib = buf[6];
@@ -3668,14 +3693,29 @@ int kvm_cpu_exec(CPUState *cpu)
                                         uint8_t base_ext = base | (ev.B_dec << 3);
                                         uint8_t index_ext = index | (ev.X_dec << 3);
 
-                                        if (base_ext < 16) {
-                                            src2_addr = env->regs[base_ext];
+                                        if (base == 0b101) {
+                                            int32_t disp32 = *(int32_t*)&buf[7];
+                                            src2_addr = disp32;
+                                            if (index != 0b100) {
+                                                src2_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 11; // EVEX(4) + opcode(1) + ModRM(1) + SIB(1) + disp32(4)
+                                        } else {
+                                            if (base_ext < 16) {
+                                                src2_addr = env->regs[base_ext];
+                                            }
+                                            if (index != 0b100) {
+                                                src2_addr += env->regs[index_ext] << scale;
+                                            }
+                                            skip_rip = 7;
                                         }
-                                        if (index != 0b100) {
-                                            src2_addr += env->regs[index_ext] << scale;
-                                        }
-                                        skip_rip = 7;
+                                    } else if (rm == 0b101) {
+                                        int32_t disp32 = *(int32_t*)&buf[6];
+                                        uint64_t next_rip = rip + 10; // EVEX(4) + opcode(1) + ModRM(1) + disp32(4)
+                                        src2_addr = next_rip + disp32;
+                                        skip_rip = 10;
                                     } else {
+                                        // Direct register
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
                                         src2_addr = env->regs[base_ext];
                                         skip_rip = 6;
@@ -3684,15 +3724,15 @@ int kvm_cpu_exec(CPUState *cpu)
                                     // Load from memory
                                     cpu_memory_rw_debug(cpu, src2_addr, (uint8_t*)src2_data, 64, 0);
 
+                                    //printk(KERN_INFO "[mIA] VADDPS: ZMM%d = ZMM%d + [mem]\n", dest_zmm, src1_zmm);
+
                                     // Perform addition
                                     if (dest_zmm < 32 && src1_zmm < 32) {
                                         for (int i = 0; i < 16; i++) {
                                             zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + src2_data[i];
                                         }
-                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + [0x%" PRIx64 "]\n", dest_zmm, src1_zmm, (uint64_t)src2_addr);
                                     }
                                 } else if (mod == 0b01) {
-                                    // [reg + disp8]
                                     if (rm == 0b100) {
                                         uint8_t sib = buf[6];
                                         int8_t disp8 = (int8_t)buf[7];
@@ -3707,22 +3747,23 @@ int kvm_cpu_exec(CPUState *cpu)
                                         if (index != 0b100) {
                                             src2_addr += env->regs[index_ext] << scale;
                                         }
-                                        src2_addr += disp8;
+                                        src2_addr += disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 8;
                                     } else {
                                         int8_t disp8 = (int8_t)buf[6];
                                         uint8_t base_ext = rm | (ev.B_dec << 3);
-                                        src2_addr = env->regs[base_ext] + disp8;
+                                        src2_addr = env->regs[base_ext] + disp8 * get_evex_disp8_scale(&ev, buf[4]);
                                         skip_rip = 7;
                                     }
 
                                     cpu_memory_rw_debug(cpu, src2_addr, (uint8_t*)src2_data, 64, 0);
 
+                                    //printk(KERN_INFO "[mIA] VADDPS: ZMM%d = ZMM%d + [mem]\n", dest_zmm, src1_zmm);
+
                                     if (dest_zmm < 32 && src1_zmm < 32) {
                                         for (int i = 0; i < 16; i++) {
                                             zmm_registers[dest_zmm][i] = zmm_registers[src1_zmm][i] + src2_data[i];
                                         }
-                                        // fprintf(stderr, "[mIA] VADDPS: zmm%d = zmm%d + [0x%" PRIx64 "]\n", dest_zmm, src1_zmm, (uint64_t)src2_addr);
                                     }
                                 } else if (mod == 0b10) {
                                     // [reg + disp32]
